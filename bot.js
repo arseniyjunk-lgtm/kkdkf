@@ -47,60 +47,44 @@ app.use(express.json({ limit: '50mb' }));
 // Синхронизация данных из веб-приложения
 app.post('/api/sync', (req, res) => {
     try {
-        const data = loadData();
-        const userData = req.body;
+        const { users, depositRequests, withdrawRequests } = req.body;
+        const currentData = loadData();
 
-        console.log(`📥 Получены данные от пользователя: ${userData.userId}`);
+        console.log('📥 Получены данные для синхронизации');
 
-        if (userData.userId) {
-            // Сохраняем или обновляем пользователя
-            if (!data.users[userData.userId]) {
-                data.users[userData.userId] = {
-                    id: userData.userId,
-                    name: userData.userName || 'Игрок',
-                    balance: 0,
-                    transactions: [],
-                    registered: new Date().toLocaleString()
-                };
-            }
-
-            // Обновляем данные пользователя
-            data.users[userData.userId].name = userData.userName || data.users[userData.userId].name;
-            data.users[userData.userId].balance = userData.balance || 0;
-            data.users[userData.userId].lastSeen = new Date().toLocaleString();
-
-            // Обновляем транзакции
-            if (userData.transactions) {
-                data.users[userData.userId].transactions = userData.transactions;
-            }
-
-            // Сохраняем всех пользователей, если они пришли
-            if (userData.allUsers) {
-                for (let userId in userData.allUsers) {
-                    if (!data.users[userId]) {
-                        data.users[userId] = userData.allUsers[userId];
+        // Обновляем пользователей
+        if (users) {
+            for (let userId in users) {
+                if (userId !== '_global') {
+                    if (!currentData.users[userId]) {
+                        currentData.users[userId] = users[userId];
+                    } else {
+                        // Обновляем существующего пользователя
+                        currentData.users[userId].balance = users[userId].balance;
+                        currentData.users[userId].lastSeen = users[userId].lastSeen;
+                        if (users[userId].transactions) {
+                            currentData.users[userId].transactions = users[userId].transactions;
+                        }
                     }
                 }
             }
-
-            // Обновляем заявки
-            if (userData.depositRequests) {
-                const existingIds = new Set(data.depositRequests.map(r => r.id));
-                const newRequests = userData.depositRequests.filter(r => !existingIds.has(r.id));
-                data.depositRequests = [...data.depositRequests, ...newRequests];
-            }
-
-            if (userData.withdrawRequests) {
-                const existingIds = new Set(data.withdrawRequests.map(r => r.id));
-                const newRequests = userData.withdrawRequests.filter(r => !existingIds.has(r.id));
-                data.withdrawRequests = [...data.withdrawRequests, ...newRequests];
-            }
-
-            saveData(data);
-            res.json({ success: true });
-        } else {
-            res.json({ success: false, error: 'No userId' });
         }
+
+        // Обновляем заявки
+        if (depositRequests) {
+            const existingIds = new Set(currentData.depositRequests.map(r => r.id));
+            const newRequests = depositRequests.filter(r => !existingIds.has(r.id));
+            currentData.depositRequests = [...currentData.depositRequests, ...newRequests];
+        }
+
+        if (withdrawRequests) {
+            const existingIds = new Set(currentData.withdrawRequests.map(r => r.id));
+            const newRequests = withdrawRequests.filter(r => !existingIds.has(r.id));
+            currentData.withdrawRequests = [...currentData.withdrawRequests, ...newRequests];
+        }
+
+        saveData(currentData);
+        res.json({ success: true });
     } catch (error) {
         console.error('Ошибка синхронизации:', error);
         res.status(500).json({ success: false, error: error.message });
@@ -181,7 +165,7 @@ bot.on('callback_query', async (callbackQuery) => {
 📊 **СТАТИСТИКА**
 
 👥 **Всего игроков:** ${users.length}
-⭐ **Всего звезд:** ${totalStars}
+⭐ **Всего звезд в системе:** ${totalStars}
 
 💰 **Ожидают пополнений:** ${pendingDeposits}
 💸 **Ожидают выводов:** ${pendingWithdraws}
