@@ -4,9 +4,8 @@ const fs = require('fs');
 const path = require('path');
 
 // ==================== КОНФИГУРАЦИЯ ====================
-// 🔴 ЗАМЕНИТЕ НА СВОИ ДАННЫЕ
-const TOKEN = '8457323450:AAGuPjJVdAjddmIPivP_xR0SEibD7_LijzU'; // Токен от @BotFather
-const ADMIN_ID = '5156389903'; // Ваш Telegram ID (узнать в @userinfobot)
+const TOKEN = '8457323450:AAGuPjJVdAjddmIPivP_xR0SEibD7_LijzU';
+const ADMIN_ID = '5156389903';
 
 const app = express();
 const bot = new TelegramBot(TOKEN, { polling: true });
@@ -17,7 +16,6 @@ const DATA_FILE = path.join(__dirname, 'users_data.json');
 
 // ==================== РАБОТА С ДАННЫМИ ====================
 
-// Загрузка данных
 function loadData() {
     try {
         if (fs.existsSync(DATA_FILE)) {
@@ -34,7 +32,6 @@ function loadData() {
     };
 }
 
-// Сохранение данных
 function saveData(data) {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
@@ -45,7 +42,7 @@ function saveData(data) {
 
 // ==================== API ДЛЯ ВЕБ-ПРИЛОЖЕНИЯ ====================
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Синхронизация данных из веб-приложения
 app.post('/api/sync', (req, res) => {
@@ -53,7 +50,7 @@ app.post('/api/sync', (req, res) => {
         const data = loadData();
         const userData = req.body;
 
-        console.log('📥 Получены данные от пользователя:', userData.userId);
+        console.log(`📥 Получены данные от пользователя: ${userData.userId}`);
 
         if (userData.userId) {
             // Сохраняем или обновляем пользователя
@@ -77,9 +74,17 @@ app.post('/api/sync', (req, res) => {
                 data.users[userData.userId].transactions = userData.transactions;
             }
 
-            // Обновляем заявки (сохраняем все, не только текущего пользователя)
+            // Сохраняем всех пользователей, если они пришли
+            if (userData.allUsers) {
+                for (let userId in userData.allUsers) {
+                    if (!data.users[userId]) {
+                        data.users[userId] = userData.allUsers[userId];
+                    }
+                }
+            }
+
+            // Обновляем заявки
             if (userData.depositRequests) {
-                // Добавляем новые заявки, сохраняя старые
                 const existingIds = new Set(data.depositRequests.map(r => r.id));
                 const newRequests = userData.depositRequests.filter(r => !existingIds.has(r.id));
                 data.depositRequests = [...data.depositRequests, ...newRequests];
@@ -119,7 +124,6 @@ app.get('/', (req, res) => {
 
 // ==================== КОМАНДЫ БОТА ====================
 
-// Команда /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
@@ -127,7 +131,6 @@ bot.onText(/\/start/, (msg) => {
     console.log(`📱 Пользователь ${userId} запустил бота`);
 
     if (userId === ADMIN_ID) {
-        // Админ - показываем полное меню
         bot.sendMessage(chatId, '👑 **Добро пожаловать в админ-панель!**', {
             parse_mode: 'Markdown',
             reply_markup: {
@@ -141,7 +144,6 @@ bot.onText(/\/start/, (msg) => {
             }
         });
     } else {
-        // Обычный пользователь
         bot.sendMessage(chatId, '🎰 **Добро пожаловать в Darkz Casino!**\n\nОткройте приложение через меню бота.', {
             parse_mode: 'Markdown'
         });
@@ -158,7 +160,6 @@ bot.on('callback_query', async (callbackQuery) => {
 
     console.log(`🖱️ Нажата кнопка: ${data} от пользователя ${userId}`);
 
-    // Проверка прав админа
     if (userId !== ADMIN_ID) {
         bot.answerCallbackQuery(callbackQuery.id, {
             text: '❌ Доступ запрещен! Только для администратора.',
@@ -173,8 +174,6 @@ bot.on('callback_query', async (callbackQuery) => {
     if (data === 'stats') {
         const users = Object.values(db.users);
         const totalStars = users.reduce((sum, u) => sum + (u.balance || 0), 0);
-        const totalDeposits = db.depositRequests?.length || 0;
-        const totalWithdraws = db.withdrawRequests?.length || 0;
         const pendingDeposits = db.depositRequests?.filter(r => r.status === 'pending').length || 0;
         const pendingWithdraws = db.withdrawRequests?.filter(r => r.status === 'pending').length || 0;
 
@@ -182,18 +181,13 @@ bot.on('callback_query', async (callbackQuery) => {
 📊 **СТАТИСТИКА**
 
 👥 **Всего игроков:** ${users.length}
-⭐ **Всего звезд в системе:** ${totalStars}
+⭐ **Всего звезд:** ${totalStars}
 
-💰 **Пополнения:**
-   • Всего: ${totalDeposits}
-   • Ожидают: ${pendingDeposits}
-
-💸 **Выводы:**
-   • Всего: ${totalWithdraws}
-   • Ожидают: ${pendingWithdraws}
+💰 **Ожидают пополнений:** ${pendingDeposits}
+💸 **Ожидают выводов:** ${pendingWithdraws}
         `;
 
-        bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
         bot.answerCallbackQuery(callbackQuery.id);
     }
 
@@ -202,7 +196,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const requests = db.depositRequests?.filter(r => r.status === 'pending') || [];
 
         if (requests.length === 0) {
-            bot.sendMessage(chatId, '💰 **Нет новых заявок на пополнение**', { parse_mode: 'Markdown' });
+            await bot.sendMessage(chatId, '💰 **Нет новых заявок на пополнение**', { parse_mode: 'Markdown' });
             bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
@@ -211,7 +205,6 @@ bot.on('callback_query', async (callbackQuery) => {
             const text = `
 💰 **ЗАЯВКА НА ПОПОЛНЕНИЕ**
 ━━━━━━━━━━━━━━━━
-🆔 ID заявки: \`${req.id}\`
 👤 Пользователь: ${req.userName}
 🆔 ID: \`${req.userId}\`
 💵 Сумма: ${req.amount} ⭐
@@ -240,7 +233,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const requests = db.withdrawRequests?.filter(r => r.status === 'pending') || [];
 
         if (requests.length === 0) {
-            bot.sendMessage(chatId, '💸 **Нет новых заявок на вывод**', { parse_mode: 'Markdown' });
+            await bot.sendMessage(chatId, '💸 **Нет новых заявок на вывод**', { parse_mode: 'Markdown' });
             bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
@@ -249,7 +242,6 @@ bot.on('callback_query', async (callbackQuery) => {
             const text = `
 💸 **ЗАЯВКА НА ВЫВОД**
 ━━━━━━━━━━━━━━━━
-🆔 ID заявки: \`${req.id}\`
 👤 Пользователь: ${req.userName}
 🆔 ID: \`${req.userId}\`
 💵 Сумма: ${req.amount} ⭐
@@ -278,12 +270,11 @@ bot.on('callback_query', async (callbackQuery) => {
         const users = Object.values(db.users);
 
         if (users.length === 0) {
-            bot.sendMessage(chatId, '👥 **Нет пользователей**', { parse_mode: 'Markdown' });
+            await bot.sendMessage(chatId, '👥 **Нет пользователей**', { parse_mode: 'Markdown' });
             bot.answerCallbackQuery(callbackQuery.id);
             return;
         }
 
-        // Сортируем по балансу (у кого больше звезд - сверху)
         users.sort((a, b) => (b.balance || 0) - (a.balance || 0));
 
         let text = '👥 **ВСЕ ПОЛЬЗОВАТЕЛИ**\n━━━━━━━━━━━━━━━━\n\n';
@@ -301,13 +292,13 @@ bot.on('callback_query', async (callbackQuery) => {
             text += `... и еще ${users.length - 15} пользователей\n`;
         }
 
-        bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
         bot.answerCallbackQuery(callbackQuery.id);
     }
 
-    // ===== ВЫДАЧА ЗВЕЗД (запрос ID) =====
+    // ===== ВЫДАЧА ЗВЕЗД =====
     else if (data === 'give_stars') {
-        bot.sendMessage(chatId, '⭐ **Введите ID пользователя и количество звезд через пробел**\n\nНапример:\n`5156389903 1000`', {
+        await bot.sendMessage(chatId, '⭐ **Введите ID пользователя и количество звезд через пробел**\n\nНапример:\n`5156389903 1000`', {
             parse_mode: 'Markdown'
         });
         bot.answerCallbackQuery(callbackQuery.id);
@@ -334,12 +325,11 @@ bot.on('callback_query', async (callbackQuery) => {
 
                 saveData(db);
 
-                bot.sendMessage(chatId, `✅ **Пополнение подтверждено!**\n\nПользователю ${req.userName} начислено ${req.amount} ⭐`, {
+                await bot.sendMessage(chatId, `✅ **Пополнение подтверждено!**\n\nПользователю ${req.userName} начислено ${req.amount} ⭐`, {
                     parse_mode: 'Markdown'
                 });
 
-                // Обновляем сообщение с заявкой (убираем кнопки)
-                bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+                await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
                     chat_id: chatId,
                     message_id: msg.message_id
                 });
@@ -357,11 +347,11 @@ bot.on('callback_query', async (callbackQuery) => {
             req.status = 'rejected';
             saveData(db);
 
-            bot.sendMessage(chatId, `❌ **Заявка отклонена**\n\nСумма: ${req.amount} ⭐`, {
+            await bot.sendMessage(chatId, `❌ **Заявка отклонена**\n\nСумма: ${req.amount} ⭐`, {
                 parse_mode: 'Markdown'
             });
 
-            bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
                 chat_id: chatId,
                 message_id: msg.message_id
             });
@@ -391,16 +381,16 @@ bot.on('callback_query', async (callbackQuery) => {
 
                     saveData(db);
 
-                    bot.sendMessage(chatId, `✅ **Вывод подтвержден!**\n\nСо счета пользователя ${req.userName} списано ${req.amount} ⭐`, {
+                    await bot.sendMessage(chatId, `✅ **Вывод подтвержден!**\n\nСо счета пользователя ${req.userName} списано ${req.amount} ⭐`, {
                         parse_mode: 'Markdown'
                     });
 
-                    bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+                    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
                         chat_id: chatId,
                         message_id: msg.message_id
                     });
                 } else {
-                    bot.sendMessage(chatId, `❌ **Ошибка!**\n\nУ пользователя недостаточно средств (баланс: ${user.balance} ⭐)`, {
+                    await bot.sendMessage(chatId, `❌ **Ошибка!**\n\nУ пользователя недостаточно средств (баланс: ${user.balance} ⭐)`, {
                         parse_mode: 'Markdown'
                     });
                 }
@@ -418,11 +408,11 @@ bot.on('callback_query', async (callbackQuery) => {
             req.status = 'rejected';
             saveData(db);
 
-            bot.sendMessage(chatId, `❌ **Заявка отклонена**\n\nСумма: ${req.amount} ⭐`, {
+            await bot.sendMessage(chatId, `❌ **Заявка отклонена**\n\nСумма: ${req.amount} ⭐`, {
                 parse_mode: 'Markdown'
             });
 
-            bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
                 chat_id: chatId,
                 message_id: msg.message_id
             });
@@ -431,20 +421,17 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-// ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ (ДЛЯ ВЫДАЧИ ЗВЕЗД) ====================
+// ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ====================
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
     const text = msg.text;
 
-    // Игнорируем команды
     if (!text || text.startsWith('/')) return;
 
-    // Только админ может выдавать звезды
     if (userId !== ADMIN_ID) return;
 
-    // Парсим сообщение: ожидаем "ID СУММА"
     const parts = text.split(' ');
     if (parts.length === 2) {
         const targetUserId = parts[0].trim();
@@ -453,7 +440,6 @@ bot.on('message', (msg) => {
         if (!isNaN(amount) && amount > 0) {
             const db = loadData();
 
-            // Ищем пользователя по ID
             if (db.users[targetUserId]) {
                 const user = db.users[targetUserId];
                 user.balance += amount;
@@ -467,28 +453,19 @@ bot.on('message', (msg) => {
 
                 saveData(db);
 
-                bot.sendMessage(chatId, `✅ **Звезды выданы!**\n\n👤 Пользователь: ${user.name}\n🆔 ID: \`${targetUserId}\`\n⭐ Сумма: +${amount}\n💰 Новый баланс: ${user.balance} ⭐`, {
+                await bot.sendMessage(chatId, `✅ **Звезды выданы!**\n\n👤 Пользователь: ${user.name}\n🆔 ID: \`${targetUserId}\`\n⭐ Сумма: +${amount}\n💰 Новый баланс: ${user.balance} ⭐`, {
                     parse_mode: 'Markdown'
                 });
             } else {
-                bot.sendMessage(chatId, `❌ **Пользователь с ID \`${targetUserId}\` не найден!**`, {
+                await bot.sendMessage(chatId, `❌ **Пользователь с ID \`${targetUserId}\` не найден!**`, {
                     parse_mode: 'Markdown'
                 });
             }
-        } else {
-            bot.sendMessage(chatId, '❌ **Неверная сумма!** Введите положительное число.', {
-                parse_mode: 'Markdown'
-            });
         }
-    } else if (parts.length !== 2 && !text.startsWith('/')) {
-        // Если сообщение не подходит под формат, но админ его отправил - показываем подсказку
-        bot.sendMessage(chatId, '⭐ **Формат выдачи звезд:**\n`ID СУММА`\n\nНапример: `5156389903 1000`', {
-            parse_mode: 'Markdown'
-        });
     }
 });
 
-// ==================== ЗАПУСК СЕРВЕРА ====================
+// ==================== ЗАПУСК ====================
 
 app.listen(PORT, () => {
     console.log(`✅ Сервер запущен на порту ${PORT}`);
